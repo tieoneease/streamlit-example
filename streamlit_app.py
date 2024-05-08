@@ -1,11 +1,7 @@
 import os
 import streamlit as st
 from google.cloud import bigquery
-from datetime import datetime
 import pandas as pd
-import matplotlib.pyplot as plt
-import plotly.graph_objects as go
-import plotly.express as px
 import nps
 import referrals
 

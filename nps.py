@@ -1,10 +1,6 @@
-import streamlit as st
-import matplotlib.pyplot as plt
 import pandas as pd
-import os
 import streamlit as st
-from google.cloud import bigquery
-from datetime import datetime
+import plotly.graph_objects as go
 
 filename = 'results_nps_old.csv'
 
@@ -84,25 +80,57 @@ def calculate_nps(data):
     pivot['Quarter'] = pivot.apply(lambda row: f"{row['year']}-Q{row['quarter']}", axis=1)
     return pivot
 
+def calculate_total_responses(data):
+    # Sum up all responses by year and quarter
+    total_by_quarter = data.groupby(['year', 'quarter']).agg({'total_responses': 'sum'}).reset_index()
+    total_by_quarter['Quarter'] = total_by_quarter.apply(lambda row: f"{row['year']}-Q{row['quarter']}", axis=1)
+    return total_by_quarter
+
 def plot_nps(data):
     st.title("Quarterly Trends: Results NPS")
-    fig, ax = plt.subplots()
+    fig = go.Figure()
+
     surveys = [('14 Day Post Treatment', 'Results NPS')]
-    #surveys = [('14 Day Post Treatment', 'Results NPS'), ('Post Appointment', 'Visit NPS')]
     service_types = ['Returning', 'New']
-    #service_types = ['Other', 'Returning', 'New']
     for survey_label, survey_title in surveys:
         for service_type in service_types:
             service_data = data[(data['surveyName'] == survey_label) & (data['service_type'] == service_type)]
             if not service_data.empty:
-                ax.plot(service_data['Quarter'], service_data['NPS'], label=f"{survey_title} - {service_type}")
-    ax.set_xticks(data['Quarter'].unique())
-    ax.set_xticklabels(data['Quarter'].unique(), rotation=45)
-    ax.set_xlabel('Quarter')
-    ax.set_ylabel('NPS')
-    ax.set_title('NPS Trend by Quarter, Survey, and Service Type')
-    ax.legend()
-    st.pyplot(fig)
+                fig.add_trace(go.Scatter(
+                    x=service_data['Quarter'],
+                    y=service_data['NPS'],
+                    mode='lines+markers',
+                    name=f"{survey_title} - {service_type}"
+                ))
+
+    fig.update_layout(
+        title='NPS Trend by Quarter, Survey, and Service Type',
+        xaxis_title='Quarter',
+        yaxis_title='NPS',
+        legend_title='Service Type',
+        xaxis=dict(tickmode='array', tickvals=service_data['Quarter'], ticktext=service_data['Quarter'])
+    )
+    st.plotly_chart(fig)
+
+def plot_total_responses(data):
+    st.title("Total Responses Over Time")
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=data['Quarter'],
+        y=data['total_responses'],
+        mode='lines+markers',
+        name='Total Responses'
+    ))
+
+    fig.update_layout(
+        title='Total Scored Responses by Quarter',
+        xaxis_title='Quarter',
+        yaxis_title='Total Responses',
+        legend_title='Response Type',
+        xaxis=dict(tickmode='array', tickvals=data['Quarter'], ticktext=data['Quarter'])
+    )
+    st.plotly_chart(fig)
 
 def merge_data(old, new):
     # Merge the two datasets on common columns
@@ -113,8 +141,19 @@ def merge_data(old, new):
     return merged_data
 
 def run(client, start_date, end_date):
-    old = calculate_nps(fetch_data(client, start_date, end_date))
-    new = read_results_nps(filename)
-    merged = merge_data(old, new)
-    calculated =calculate_nps(merged)
-    plot_nps(calculated)
+    # Fetch and process the data from BigQuery
+    new_data = calculate_nps(fetch_data(client, start_date, end_date))
+
+    # Read and process the CSV data
+    old_data = read_results_nps(filename)
+
+    # Merge both data sources
+    merged_data = merge_data(old_data, new_data)
+
+    # Calculate NPS from the merged data
+    nps_data = calculate_nps(merged_data)
+    plot_nps(nps_data)
+
+    # Calculate and plot total responses from the merged data
+    total_responses_data = calculate_total_responses(merged_data)
+    plot_total_responses(total_responses_data)
