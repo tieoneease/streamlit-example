@@ -63,14 +63,3 @@ def plot_nps(data):
     st.pyplot(fig)
 
 
-# Streamlit UI
-st.title("NPS Dashboard")
-start_date = st.date_input("Start Date", datetime.now().replace(year=datetime.now().year-1, month=1, day=1))
-end_date = st.date_input("End Date", datetime.now())
-
-# Automatically load and display NPS plot
-nps_data = fetch_data(start_date, end_date)
-if not nps_data.empty:
-    plot_nps(calculate_nps(nps_data))
-else:
-    st.write("No NPS data available for the selected date range.")

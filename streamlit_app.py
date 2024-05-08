@@ -4,6 +4,7 @@ from google.cloud import bigquery
 from datetime import datetime
 import pandas as pd
 import matplotlib.pyplot as plt
+import nps
 
 # Set the Google Cloud credentials environment variable
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "service-account.json"
@@ -12,7 +13,7 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "service-account.json"
 project = 'peachy-268419'
 client = bigquery.Client(project=project)
 
-def fetch_appointment_data(start_date, end_date):
+def fetch_appointment_data(client, start_date, end_date):
     query = f"""
     SELECT
         appointment_id,
@@ -30,7 +31,7 @@ def fetch_appointment_data(start_date, end_date):
     """
     return client.query(query).to_dataframe()
 
-def fetch_survey_data(start_date, end_date):
+def fetch_survey_data(client, start_date, end_date):
     survey_query = f"""
     SELECT
         appointment_id,
@@ -110,14 +111,25 @@ def plot_response_trends(data):
 
     st.pyplot(fig)
 
+
 # Streamlit UI
-st.title("Responses Dashboard")
+st.title("NPS Dashboard")
 start_date = st.date_input("Start Date", datetime.now().replace(year=datetime.now().year-1, month=1, day=1))
 end_date = st.date_input("End Date", datetime.now())
 
+# Automatically load and display NPS plot
+nps_data = nps.fetch_data(start_date, end_date)
+if not nps_data.empty:
+    nps.plot_nps(nps.calculate_nps(nps_data))
+else:
+    st.write("No NPS data available for the selected date range.")
+
+# Streamlit UI
+st.title("Responses Dashboard")
+
 # Automatically load and display survey count and percentage plot
-appointment_data = fetch_appointment_data(start_date, end_date)
-survey_data = fetch_survey_data(start_date, end_date)
+appointment_data = fetch_appointment_data(client, start_date, end_date)
+survey_data = fetch_survey_data(client, start_date, end_date)
 response_data = calculate_response_ratios(appointment_data, survey_data)
 if not response_data.empty:
     response_data['quarter_label'] = response_data.apply(lambda row: f"{row['year']}-Q{row['quarter']}", axis=1)
