@@ -12,162 +12,115 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "service-account.json"
 project = 'peachy-268419'
 client = bigquery.Client(project=project)
 
-def fetch_data(start_date, end_date):
+def fetch_appointment_data(start_date, end_date):
     query = f"""
     SELECT
-        EXTRACT(YEAR FROM appointment_date) AS year,
-        EXTRACT(QUARTER FROM appointment_date) AS quarter,
-        surveyName,
-        CASE
-            WHEN service_booked IS NULL OR service_booked LIKE '%Dose Adjustment%' THEN 'Other'
-            WHEN service_booked LIKE '%Treatment%' THEN 'Returning'
-            WHEN service_booked LIKE '%Consultation%' THEN 'New'
-        END AS service_type,
-        score,
-        COUNT(*) as total_responses
-    FROM
-        `treatment_analytics.mv_responses_appointments`
-    WHERE
-        appointment_date BETWEEN '{start_date}' AND '{end_date}'
-    GROUP BY
-        year, quarter, surveyName, service_type, score
-    """
-    query_job = client.query(query)
-    return query_job.to_dataframe()
-
-def fetch_appointments_data(start_date, end_date):
-    query = f"""
-    SELECT
+        appointment_id,
         EXTRACT(YEAR FROM appointment_date) AS year,
         EXTRACT(QUARTER FROM appointment_date) AS quarter,
         CASE
             WHEN service_finalized IS NULL OR service_finalized LIKE '%Dose Adjustment%' THEN 'Other'
             WHEN service_finalized LIKE '%Treatment%' THEN 'Returning'
             WHEN service_finalized LIKE '%Consultation%' THEN 'New'
-        END AS service_type,
-        appointment_id,
-        appointment_date,
-        location,
-        firebase_practitioner_name
+        END AS service_type
     FROM
         `firebase.appointments`
     WHERE
         appointment_date BETWEEN '{start_date}' AND '{end_date}'
-    GROUP BY
-        year, quarter, service_type, appointment_id, appointment_date, location, firebase_practitioner_name
     """
-    query_job = client.query(query)
-    return query_job.to_dataframe()
+    return client.query(query).to_dataframe()
 
-def calculate_nps(data):
-    data['category'] = data['score'].apply(lambda x: 'Promoter' if x >= 9 else ('Detractor' if x <= 6 else 'Passive'))
-    summary = data.groupby(['year', 'quarter', 'surveyName', 'service_type', 'category']).agg({'total_responses': 'sum'}).reset_index()
-    pivot = summary.pivot(index=['year', 'quarter', 'surveyName', 'service_type'], columns='category', values='total_responses').fillna(0)
-    pivot['NPS'] = ((pivot['Promoter'] - pivot['Detractor']) / (pivot['Promoter'] + pivot['Passive'] + pivot['Detractor'])) * 100
-    pivot.reset_index(inplace=True)
-    pivot['Quarter'] = pivot.apply(lambda row: f"{row['year']}-Q{row['quarter']}", axis=1)
-    return pivot
-
-def fetch_combined_data(start_date, end_date):
-    # Fetch survey data with service type categorized
+def fetch_survey_data(start_date, end_date):
     survey_query = f"""
     SELECT
-        a.appointment_id,
+        appointment_id,
+        EXTRACT(YEAR FROM appointment_date) AS year,
+        EXTRACT(QUARTER FROM appointment_date) AS quarter,
         CASE
-            WHEN a.service_booked IS NULL OR a.service_booked LIKE '%Dose Adjustment%' THEN 'Other'
-            WHEN a.service_booked LIKE '%Treatment%' THEN 'Returning'
-            WHEN a.service_booked LIKE '%Consultation%' THEN 'New'
-        END AS service_type,
-        a.score
-    FROM
-        `treatment_analytics.mv_responses_appointments` a
-    WHERE
-        a.appointment_date BETWEEN '{start_date}' AND '{end_date}'
-    """
-
-    # Fetch appointment data with service type categorized
-    appointment_query = f"""
-    SELECT
-        b.appointment_id,
-        CASE
-            WHEN b.service_finalized IS NULL OR b.service_finalized LIKE '%Dose Adjustment%' THEN 'Other'
-            WHEN b.service_finalized LIKE '%Treatment%' THEN 'Returning'
-            WHEN b.service_finalized LIKE '%Consultation%' THEN 'New'
+            WHEN service_booked IS NULL OR service_booked LIKE '%Dose Adjustment%' THEN 'Other'
+            WHEN service_booked LIKE '%Treatment%' THEN 'Returning'
+            WHEN service_booked LIKE '%Consultation%' THEN 'New'
         END AS service_type
     FROM
-        `firebase.appointments` b
+        `treatment_analytics.mv_responses_appointments`
     WHERE
-        b.appointment_date BETWEEN '{start_date}' AND '{end_date}'
+        appointment_date BETWEEN '{start_date}' AND '{end_date}'
     """
+    return client.query(survey_query).to_dataframe()
 
-    survey_data = client.query(survey_query).to_dataframe()
-    appointment_data = client.query(appointment_query).to_dataframe()
+def calculate_response_ratios(appointments_data, survey_data):
+    # Print columns for debugging
+    print("Appointments columns:", appointments_data.columns)  # Debugging line
+    print("Survey columns:", survey_data.columns)  # Debugging line
 
-    # Join on appointment_id
-    combined_data = pd.merge(survey_data, appointment_data, on='appointment_id', suffixes=('_survey', '_appointment'))
-    return combined_data
+    # Merge data while specifying suffixes to resolve column name conflicts
+    combined_data = pd.merge(
+        appointments_data,
+        survey_data,
+        on='appointment_id',
+        suffixes=('_appt', '_survey')
+    )
 
-def calculate_percentages(data):
-    # Count the number of surveys and appointments by service type
-    survey_counts = data.groupby('service_type_survey').size().reset_index(name='survey_count')
-    appointment_counts = data.groupby('service_type_appointment').size().reset_index(name='appointment_count')
+    # Ensure 'year', 'quarter', and 'service_type' are aligned before grouping
+    # Assuming 'service_type_appt' and 'service_type_survey' are always the same, we can simplify:
+    combined_data['service_type'] = combined_data['service_type_appt']
+    combined_data['year'] = combined_data['year_appt']
+    combined_data['quarter'] = combined_data['quarter_appt']
 
-    # Calculate percentages
-    combined_counts = pd.merge(survey_counts, appointment_counts, left_on='service_type_survey', right_on='service_type_appointment')
-    combined_counts['percentage'] = (combined_counts['survey_count'] / combined_counts['appointment_count']) * 100
-    return combined_counts
+    print("Combined columns:", combined_data.columns)  # Debugging line
 
-def plot_survey_counts(data):
-    result_data = calculate_percentages(data)
-    fig, ax1 = plt.subplots()
+    # Group by year, quarter, and service type to summarize
+    grouped = combined_data.groupby(['year', 'quarter', 'service_type']).agg(
+        total_appointments=pd.NamedAgg(column='appointment_id', aggfunc='nunique'),
+        survey_responses=pd.NamedAgg(column='appointment_id', aggfunc='nunique')
+    ).reset_index()
 
-    # Plotting
-    colors = ['tab:blue', 'tab:orange']
-    ax1.set_xlabel('Service Type')
-    ax1.set_ylabel('Counts', color='tab:red')
-    ax1.bar(result_data['service_type_survey'], result_data['survey_count'], color='tab:red')
-    ax1.tick_params(axis='y', labelcolor='tab:red')
+    # Calculate the response ratio
+    grouped['response_ratio'] = (grouped['survey_responses'] / grouped['total_appointments']) * 100
 
-    ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
-    ax2.set_ylabel('Percentage', color='tab:blue')
-    ax2.plot(result_data['service_type_survey'], result_data['percentage'], color='tab:blue')
-    ax2.tick_params(axis='y', labelcolor='tab:blue')
+    return grouped
 
-    plt.title('Survey Response Counts and Percentages by Service Type')
-    st.pyplot(fig)
-
-def plot_nps(data):
+def plot_response_trends(data):
     fig, ax = plt.subplots()
-    surveys = [('14 Day Post Treatment', 'Results NPS'), ('Post Appointment', 'Visit NPS')]
-    service_types = ['Other', 'Returning', 'New']
-    for survey_label, survey_title in surveys:
-        for service_type in service_types:
-            service_data = data[(data['surveyName'] == survey_label) & (data['service_type'] == service_type)]
-            if not service_data.empty:
-                ax.plot(service_data['Quarter'], service_data['NPS'], label=f"{survey_title} - {service_type}")
-    ax.set_xticks(data['Quarter'].unique())
-    ax.set_xticklabels(data['Quarter'].unique(), rotation=45)
+
+    # Prepare data
+    quarter_labels = sorted(data['quarter_label'].unique())  # Sorted and unique quarters
+    quarter_indices = {q: i for i, q in enumerate(quarter_labels)}  # Mapping quarters to indices
+
+    # Plotting logic with numeric x-axis
+    if 'New' in data['service_type'].values:
+        new_client_data = data[data['service_type'] == 'New']
+        new_x = [quarter_indices[q] for q in new_client_data['quarter_label']]
+        ax.plot(new_x, new_client_data['response_ratio'], label='New Clients Responses (%)', marker='o', linestyle='-', color='blue')
+
+    if 'Returning' in data['service_type'].values:
+        returning_client_data = data[data['service_type'] == 'Returning']
+        returning_x = [quarter_indices[q] for q in returning_client_data['quarter_label']]
+        ax.plot(returning_x, returning_client_data['response_ratio'], label='Returning Clients Responses (%)', marker='s', linestyle='--', color='green')
+
+    # Setting labels and title
     ax.set_xlabel('Quarter')
-    ax.set_ylabel('NPS')
-    ax.set_title('NPS Trend by Quarter, Survey, and Service Type')
+    ax.set_ylabel('Response Percentage')
+    ax.set_title('Survey Response Percentage by Quarter and Client Type')
     ax.legend()
+
+    # Setting x-ticks and labels
+    ax.set_xticks(range(len(quarter_labels)))
+    ax.set_xticklabels(quarter_labels, rotation=45)
+
     st.pyplot(fig)
 
 # Streamlit UI
-st.title("NPS Dashboard")
+st.title("Responses Dashboard")
 start_date = st.date_input("Start Date", datetime.now().replace(year=datetime.now().year-1, month=1, day=1))
 end_date = st.date_input("End Date", datetime.now())
 
-# Automatically load and display NPS plot
-nps_data = fetch_data(start_date, end_date)
-if not nps_data.empty:
-    plot_nps(calculate_nps(nps_data))
-else:
-    st.write("No NPS data available for the selected date range.")
-
 # Automatically load and display survey count and percentage plot
-survey_data = fetch_combined_data(start_date, end_date)
-if not survey_data.empty:
-    plot_survey_counts(calculate_percentages(survey_data))
+appointment_data = fetch_appointment_data(start_date, end_date)
+survey_data = fetch_survey_data(start_date, end_date)
+response_data = calculate_response_ratios(appointment_data, survey_data)
+if not response_data.empty:
+    response_data['quarter_label'] = response_data.apply(lambda row: f"{row['year']}-Q{row['quarter']}", axis=1)
+    plot_response_trends(response_data)
 else:
-    st.write("No survey data available for the selected date range.")
+    st.write("No survey response data available for the selected date range.")
