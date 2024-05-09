@@ -91,6 +91,27 @@ def fetch_data(client, start_date, end_date):
         raise ValueError("Failed to retrieve 'total_responses' column. Check SQL query and output.")
     return data
 
+def fetch_total_appointments(client, start_date, end_date):
+    query = f"""
+    SELECT
+        EXTRACT(YEAR FROM appointment_date) AS year,
+        EXTRACT(QUARTER FROM appointment_date) AS quarter,
+        CASE
+            WHEN service_booked LIKE '%Treatment%' THEN 'Returning'
+            WHEN service_booked LIKE '%Consultation%' THEN 'New'
+            ELSE 'Other'
+        END AS service_type,
+        COUNT(*) AS total_appointments
+    FROM
+        `firebase.appointments`
+    WHERE
+        appointment_date BETWEEN '{start_date}' AND '{end_date}'
+    GROUP BY
+        year, quarter, service_type
+    """
+    query_job = client.query(query)
+    return query_job.to_dataframe()
+
 def calculate_nps(data):
     pivot = data.pivot(index=['year', 'quarter', 'surveyName', 'service_type'], columns='category', values='total_responses').fillna(0)
     pivot['NPS'] = ((pivot['Promoter'] - pivot['Detractor']) / (pivot['Promoter'] + pivot['Passive'] + pivot['Detractor'])) * 100
@@ -169,6 +190,39 @@ def merge_data(old, new):
 
     return merged_data
 
+def calculate_response_percentages(total_responses, total_appointments):
+    # Merge the response data with appointment totals
+    merged_data = pd.merge(total_responses, total_appointments, on=['year', 'quarter', 'service_type'], how='left')
+    # Calculate percentages
+    merged_data['response_percentage'] = (merged_data['total_responses'] / merged_data['total_appointments']) * 100
+    merged_data.fillna(0, inplace=True)  # Handle any divisions by zero or missing data
+    merged_data['Quarter'] = merged_data.apply(lambda row: f"{row['year']}-Q{row['quarter']}", axis=1)
+    return merged_data
+
+def plot_response_rates(data):
+    st.title("Response Rates as % of Total Appointments")
+    fig = go.Figure()
+
+    # Filter data for each service type and plot
+    for service_type in ['Returning', 'New']:
+        service_data = data[data['service_type'] == service_type]
+        fig.add_trace(go.Scatter(
+            x=service_data['Quarter'],
+            y=service_data['response_percentage'],
+            mode='lines+markers',
+            name=f'{service_type} Clients'
+        ))
+
+    fig.update_layout(
+        title='Quarterly Response Rates by Client Type',
+        xaxis_title='Quarter',
+        yaxis_title='Response Rate (%)',
+        legend_title='Client Type',
+        xaxis=dict(tickmode='array', tickvals=service_data['Quarter'], ticktext=service_data['Quarter'])
+    )
+    st.plotly_chart(fig)
+
+
 def run(client, start_date, end_date):
     # Fetch and process the data from BigQuery
     new_data = fetch_data(client, start_date, end_date)
@@ -181,13 +235,16 @@ def run(client, start_date, end_date):
     # Merge both data sources
     merged_data = merge_data(old_data, new_data)
 
-    print(merged_data.head())
-    print(merged_data.dtypes)
-
     # Calculate NPS from the merged data
     nps_data = calculate_nps(merged_data)
     plot_nps(nps_data)
 
-    # Calculate and plot total responses from the merged data
-    total_responses_data = calculate_total_responses(merged_data)
-    plot_total_responses(total_responses_data)
+    # Fetch and process appointment data
+    total_appointments = fetch_total_appointments(client, start_date, end_date)
+
+    print(merged_data.dtypes)
+    print(total_appointments.dtypes)
+    print(total_appointments.head())
+    # Calculate response percentages
+    response_percentages = calculate_response_percentages(merged_data, total_appointments)
+    plot_response_rates(response_percentages)
