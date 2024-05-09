@@ -193,34 +193,45 @@ def merge_data(old, new):
 def calculate_response_percentages(total_responses, total_appointments):
     # Merge the response data with appointment totals
     merged_data = pd.merge(total_responses, total_appointments, on=['year', 'quarter', 'service_type'], how='left')
-    # Calculate percentages
-    merged_data['response_percentage'] = (merged_data['total_responses'] / merged_data['total_appointments']) * 100
-    merged_data.fillna(0, inplace=True)  # Handle any divisions by zero or missing data
-    merged_data['Quarter'] = merged_data.apply(lambda row: f"{row['year']}-Q{row['quarter']}", axis=1)
-    return merged_data
+    
+    # Sum up responses and calculate the percentages for each group
+    aggregated_data = merged_data.groupby(['year', 'quarter', 'service_type']).agg(
+        total_responses=pd.NamedAgg(column='total_responses', aggfunc='sum'),
+        total_appointments=pd.NamedAgg(column='total_appointments', aggfunc='sum')
+    ).reset_index()
+
+    # Calculate response percentages
+    aggregated_data['response_percentage'] = (aggregated_data['total_responses'] / aggregated_data['total_appointments']) * 100
+    aggregated_data['Quarter'] = aggregated_data.apply(lambda row: f"{row['year']}-Q{row['quarter']}", axis=1)
+    
+    return aggregated_data
+
 
 def plot_response_rates(data):
     st.title("Response Rates as % of Total Appointments")
     fig = go.Figure()
 
-    # Filter data for each service type and plot
     for service_type in ['Returning', 'New']:
         service_data = data[data['service_type'] == service_type]
-        fig.add_trace(go.Scatter(
-            x=service_data['Quarter'],
-            y=service_data['response_percentage'],
-            mode='lines+markers',
-            name=f'{service_type} Clients'
-        ))
+        if not service_data.empty:
+            fig.add_trace(go.Bar(
+                x=service_data['Quarter'],
+                y=service_data['response_percentage'],
+                name=f'{service_type} Clients',
+                text=service_data['response_percentage'].apply(lambda x: f'{x:.2f}%'),
+                textposition='inside'
+            ))
 
     fig.update_layout(
         title='Quarterly Response Rates by Client Type',
         xaxis_title='Quarter',
         yaxis_title='Response Rate (%)',
         legend_title='Client Type',
+        barmode='group',  # Use 'group' to place bars side by side
         xaxis=dict(tickmode='array', tickvals=service_data['Quarter'], ticktext=service_data['Quarter'])
     )
     st.plotly_chart(fig)
+
 
 
 def run(client, start_date, end_date):
