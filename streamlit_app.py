@@ -8,10 +8,13 @@ import json
 from google.oauth2 import service_account
 
 # Retrieve the encoded JSON from the environment variable
-encoded_json = os.getenv('GOOGLE_CREDENTIALS')
+encoded_credentials = os.getenv('GOOGLE_CREDENTIALS')
+if not encoded_credentials:
+    raise EnvironmentError("Missing ENCODED_GOOGLE_CREDENTIALS in environment variables.")
+
 
 # Decode the JSON back to its original format
-json_creds = base64.b64decode(encoded_json).decode()
+json_creds = base64.b64decode(encoded_credentials).decode()
 
 # Convert the JSON string back to a dictionary
 credentials_dict = json.loads(json_creds)
