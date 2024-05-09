@@ -4,6 +4,18 @@ import plotly.graph_objects as go
 
 filename = 'results_nps_old.csv'
 
+def debug_data(old, new):
+    print("Old Data Sample:")
+    print(old.head())
+    print("Old Data Types:")
+    print(old.dtypes)
+
+    print("New Data Sample:")
+    print(new.head())
+    print("New Data Types:")
+    print(new.dtypes)
+
+
 def read_results_nps(file):
     try:
         # Attempt to read the CSV file with UTF-16 encoding
@@ -37,9 +49,11 @@ def read_results_nps(file):
         # Extract year and quarter from 'appointment_date'
         df['year'] = pd.DatetimeIndex(df['appointment_date']).year
         df['quarter'] = pd.DatetimeIndex(df['appointment_date']).quarter
+        df['category'] = df['score'].apply(lambda x: 'Promoter' if x >= 9 else ('Detractor' if x <= 6 else 'Passive'))
+        df.drop(columns=['score'])
 
         # Group and calculate total responses as in your existing fetch_data function
-        grouped = df.groupby(['year', 'quarter', 'service_type', 'score']).size().reset_index(name='total_responses')
+        grouped = df.groupby(['year', 'quarter', 'service_type', 'category']).size().reset_index(name='total_responses')
 
         # Assume all responses are part of 'Results NPS' survey since the dataset only contains Results NPS
         grouped['surveyName'] = '14 Day Post Treatment'
@@ -58,23 +72,27 @@ def fetch_data(client, start_date, end_date):
             WHEN service_booked LIKE '%Treatment%' THEN 'Returning'
             WHEN service_booked LIKE '%Consultation%' THEN 'New'
         END AS service_type,
-        score,
+        CASE 
+            WHEN score >= 9 THEN 'Promoter'
+            WHEN score <= 6 THEN 'Detractor'
+            ELSE 'Passive'
+        END AS category,
         COUNT(*) as total_responses
     FROM
         `treatment_analytics.mv_responses_appointments`
     WHERE
         appointment_date BETWEEN '{start_date}' AND '{end_date}'
     GROUP BY
-        year, quarter, surveyName, service_type, score
+        year, quarter, surveyName, service_type, category
     """
     query_job = client.query(query)
-    return query_job.to_dataframe()
-
+    data = query_job.to_dataframe()
+    if 'total_responses' not in data.columns:
+        raise ValueError("Failed to retrieve 'total_responses' column. Check SQL query and output.")
+    return data
 
 def calculate_nps(data):
-    data['category'] = data['score'].apply(lambda x: 'Promoter' if x >= 9 else ('Detractor' if x <= 6 else 'Passive'))
-    summary = data.groupby(['year', 'quarter', 'surveyName', 'service_type', 'category']).agg({'total_responses': 'sum'}).reset_index()
-    pivot = summary.pivot(index=['year', 'quarter', 'surveyName', 'service_type'], columns='category', values='total_responses').fillna(0)
+    pivot = data.pivot(index=['year', 'quarter', 'surveyName', 'service_type'], columns='category', values='total_responses').fillna(0)
     pivot['NPS'] = ((pivot['Promoter'] - pivot['Detractor']) / (pivot['Promoter'] + pivot['Passive'] + pivot['Detractor'])) * 100
     pivot.reset_index(inplace=True)
     pivot['Quarter'] = pivot.apply(lambda row: f"{row['year']}-Q{row['quarter']}", axis=1)
@@ -133,22 +151,38 @@ def plot_total_responses(data):
     st.plotly_chart(fig)
 
 def merge_data(old, new):
-    # Merge the two datasets on common columns
-    merged_data = pd.merge(old, new, on=['year', 'quarter', 'surveyName', 'service_type'], how='outer')
+    # Merge the two datasets on common columns and sum the total_responses from both
+    merged_data = pd.merge(old, new, on=['year', 'quarter', 'surveyName', 'service_type', 'category'], how='outer', suffixes=('_old', '_new'))
 
-    # You might need to fill NaN values after merging if there are mismatches
+    # Instead of using inplace=True in an assignment chain, directly assign the filled values to the columns
+    merged_data['total_responses_old'] = merged_data['total_responses_old'].fillna(0)
+    merged_data['total_responses_new'] = merged_data['total_responses_new'].fillna(0)
+
+    # Sum the responses from both datasets
+    merged_data['total_responses'] = merged_data['total_responses_old'] + merged_data['total_responses_new']
+
+    # Drop the original total_responses columns as they are no longer needed
+    merged_data.drop(columns=['total_responses_old', 'total_responses_new'], inplace=True)
+
+    # Fill NaN values in the merged DataFrame to ensure no missing data issues
     merged_data.fillna(0, inplace=True)
+
     return merged_data
 
 def run(client, start_date, end_date):
     # Fetch and process the data from BigQuery
-    new_data = calculate_nps(fetch_data(client, start_date, end_date))
+    new_data = fetch_data(client, start_date, end_date)
 
     # Read and process the CSV data
     old_data = read_results_nps(filename)
 
+    debug_data(old_data, new_data)
+
     # Merge both data sources
     merged_data = merge_data(old_data, new_data)
+
+    print(merged_data.head())
+    print(merged_data.dtypes)
 
     # Calculate NPS from the merged data
     nps_data = calculate_nps(merged_data)
