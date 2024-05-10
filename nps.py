@@ -154,7 +154,7 @@ def plot_nps(data):
     st.plotly_chart(fig)
 
 def plot_total_responses(data):
-    st.title("Total Responses Over Time")
+    st.subheader("Total Responses Over Time")
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
@@ -210,7 +210,7 @@ def calculate_response_percentages(total_responses, total_appointments):
 
 
 def plot_response_rates(data):
-    st.title("Response Rates as % of Total Appointments")
+    st.subheader("Response Rates as % of Total Appointments")
     fig = go.Figure()
 
     for service_type in ['Returning', 'New']:

@@ -10,7 +10,7 @@ from google.oauth2 import service_account
 
 # Function to get credentials
 def get_credentials():
-    encoded_credentials = os.getenv('GOOGLE_CREDENTIALS')
+    encoded_credentials = st.secrets['GOOGLE_CREDENTIALS']
     if not encoded_credentials:
         raise EnvironmentError("Missing GOOGLE_CREDENTIALS in environment variables.")
     json_creds = base64.b64decode(encoded_credentials).decode()
