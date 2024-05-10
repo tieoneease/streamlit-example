@@ -32,34 +32,35 @@ def get_appointments_data(client, start_date, end_date):
 
 def run(client, start_date, end_date):
     data = get_appointments_data(client, start_date, end_date)
-    data['quarter_year'] = data['year'].astype(str) + ' Q' + data['quarter'].astype(str)
+    # Format 'quarter_year' to the desired format like '1Q23', ensuring both 'quarter' and 'year' are treated as integers
+    data['quarter_year'] = data.apply(lambda row: f"{int(row['quarter'])}Q{int(row['year']) % 100:02d}", axis=1)
     data['percent_new_referrals_of_new_appointments'] = data['percent_new_referrals_of_new_appointments'].map("{:.2f}%".format)
     
     # Creating the Plotly Graph Object figure
     fig = go.Figure()
 
-    # Adding total new appointments bar
+    # Adding total new treatments bar (formerly appointments)
     fig.add_trace(go.Bar(
         x=data['quarter_year'],
         y=data['total_new_appointments'] - data['total_new_referrals'],
-        name='New Appointments',
-        hovertemplate='New Appointments: %{y}<extra></extra>'
+        name='New Treatments',
+        hovertemplate='New Treatments: %{y}<extra></extra>'
     ))
 
-    # Adding total new referral appointments bar
+    # Adding total new referral treatments bar (formerly referral appointments)
     fig.add_trace(go.Bar(
         x=data['quarter_year'],
         y=data['total_new_referrals'],
-        name='New Referral Appointments',
-        text=data['percent_new_referrals_of_new_appointments'],  # Use text to store the dynamic info
-        hovertemplate='New Referral Appointments: %{y}<br>Percent of New: %{text}<extra></extra>'
+        name='New Referral Treatments',
+        text=data['percent_new_referrals_of_new_appointments'],
+        hovertemplate='New Referral Treatments: %{y}<br>Percent of New: %{text}<extra></extra>'
     ))
 
     # Add a secondary y-axis for the ratio
     fig.add_trace(go.Scatter(
         x=data['quarter_year'],
         y=data['referral_to_new_ratio'],
-        name='Referral to New Ratio',
+        name='Referral to New Treatment Ratio',
         mode='lines+markers',
         yaxis='y2',
         line=dict(color='red', width=2),
@@ -69,18 +70,17 @@ def run(client, start_date, end_date):
     # Update layout for stacked bar and secondary y-axis
     fig.update_layout(
         barmode='stack',
-        title_text="Quarterly Trends: New and New Referral Appointments",
-        yaxis=dict(title="Number of Appointments"),
-        xaxis=dict(title="Quarter-Year"),
+        title_text="Quarterly Trends: New and New Referral Treatments",
+        yaxis=dict(title="Number of Treatments"),
+        xaxis=dict(title="Quarter-Year", type='category'),
         yaxis2=dict(
-            title="Ratio of New Referrals to New Appointments",
+            title="Ratio of New Referrals to New Treatments",
             overlaying='y',
             side='right',
-            range=[0, 1.2],  # Adjust according to the expected range of your data
-            showgrid=False,  # Turn off the grid for secondary y-axis
-            color='red'  # Match line color
+            range=[0, 1.2],
+            showgrid=False,
+            color='red'
         )
     )
-
 
     st.plotly_chart(fig)

@@ -116,13 +116,15 @@ def calculate_nps(data):
     pivot = data.pivot(index=['year', 'quarter', 'surveyName', 'service_type'], columns='category', values='total_responses').fillna(0)
     pivot['NPS'] = ((pivot['Promoter'] - pivot['Detractor']) / (pivot['Promoter'] + pivot['Passive'] + pivot['Detractor'])) * 100
     pivot.reset_index(inplace=True)
-    pivot['Quarter'] = pivot.apply(lambda row: f"{row['year']}-Q{row['quarter']}", axis=1)
+    # Standardize quarter formatting
+    pivot['Quarter'] = pivot.apply(lambda row: f"{int(row['quarter'])}Q{int(row['year']) % 100:02d}", axis=1)
     return pivot
 
 def calculate_total_responses(data):
     # Sum up all responses by year and quarter
     total_by_quarter = data.groupby(['year', 'quarter']).agg({'total_responses': 'sum'}).reset_index()
-    total_by_quarter['Quarter'] = total_by_quarter.apply(lambda row: f"{row['year']}-Q{row['quarter']}", axis=1)
+    # Standardize quarter formatting
+    total_by_quarter['Quarter'] = total_by_quarter.apply(lambda row: f"{int(row['quarter'])}Q{int(row['year']) % 100:02d}", axis=1)
     return total_by_quarter
 
 def plot_nps(data):
@@ -202,7 +204,7 @@ def calculate_response_percentages(total_responses, total_appointments):
 
     # Calculate response percentages
     aggregated_data['response_percentage'] = (aggregated_data['total_responses'] / aggregated_data['total_appointments']) * 100
-    aggregated_data['Quarter'] = aggregated_data.apply(lambda row: f"{row['year']}-Q{row['quarter']}", axis=1)
+    aggregated_data['Quarter'] = aggregated_data.apply(lambda row: f"{int(row['quarter'])}Q{int(row['year']) % 100:02d}", axis=1)
     
     return aggregated_data
 
@@ -214,12 +216,13 @@ def plot_response_rates(data):
     for service_type in ['Returning', 'New']:
         service_data = data[data['service_type'] == service_type]
         if not service_data.empty:
-            fig.add_trace(go.Bar(
+            fig.add_trace(go.Scatter(
                 x=service_data['Quarter'],
                 y=service_data['response_percentage'],
+                mode='lines+markers',  # Change from bars to line with markers
                 name=f'{service_type} Clients',
                 text=service_data['response_percentage'].apply(lambda x: f'{x:.2f}%'),
-                textposition='inside'
+                textposition='top center'  # Adjust text position for clarity
             ))
 
     fig.update_layout(
@@ -227,12 +230,9 @@ def plot_response_rates(data):
         xaxis_title='Quarter',
         yaxis_title='Response Rate (%)',
         legend_title='Client Type',
-        barmode='group',  # Use 'group' to place bars side by side
         xaxis=dict(tickmode='array', tickvals=service_data['Quarter'], ticktext=service_data['Quarter'])
     )
     st.plotly_chart(fig)
-
-
 
 def run(client, start_date, end_date):
     # Fetch and process the data from BigQuery
