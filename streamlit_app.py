@@ -10,17 +10,12 @@ from google.oauth2 import service_account
 
 # Function to get credentials
 def get_credentials():
-    env = os.getenv('ENV', 'development')
-    if env == 'production':
-        encoded_credentials = os.getenv('GOOGLE_CREDENTIALS')
-        if not encoded_credentials:
-            raise EnvironmentError("Missing GOOGLE_CREDENTIALS in environment variables.")
-        json_creds = base64.b64decode(encoded_credentials).decode()
-        credentials_dict = json.loads(json_creds)
-        return service_account.Credentials.from_service_account_info(credentials_dict)
-    else:
-        # Load credentials from a file in development
-        return service_account.Credentials.from_service_account_file('service-account.json')
+    encoded_credentials = os.getenv('GOOGLE_CREDENTIALS')
+    if not encoded_credentials:
+        raise EnvironmentError("Missing GOOGLE_CREDENTIALS in environment variables.")
+    json_creds = base64.b64decode(encoded_credentials).decode()
+    credentials_dict = json.loads(json_creds)
+    return service_account.Credentials.from_service_account_info(credentials_dict)
 
 # Initialize BigQuery client with credentials
 credentials = get_credentials()
