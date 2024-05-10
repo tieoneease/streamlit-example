@@ -7,27 +7,30 @@ import base64
 import json
 from google.oauth2 import service_account
 
-# Retrieve the encoded JSON from the environment variable
-encoded_credentials = os.getenv('GOOGLE_CREDENTIALS')
-if not encoded_credentials:
-    raise EnvironmentError("Missing ENCODED_GOOGLE_CREDENTIALS in environment variables.")
 
+# Function to get credentials
+def get_credentials():
+    env = os.getenv('ENV', 'development')
+    if env == 'production':
+        encoded_credentials = os.getenv('GOOGLE_CREDENTIALS')
+        if not encoded_credentials:
+            raise EnvironmentError("Missing GOOGLE_CREDENTIALS in environment variables.")
+        json_creds = base64.b64decode(encoded_credentials).decode()
+        credentials_dict = json.loads(json_creds)
+        return service_account.Credentials.from_service_account_info(credentials_dict)
+    else:
+        # Load credentials from a file in development
+        return service_account.Credentials.from_service_account_file('service-account.json')
 
-# Decode the JSON back to its original format
-json_creds = base64.b64decode(encoded_credentials).decode()
-
-# Convert the JSON string back to a dictionary
-credentials_dict = json.loads(json_creds)
-
-# Create credentials from the service account dictionary
-credentials = service_account.Credentials.from_service_account_info(credentials_dict)
-
-import nps
-import referrals
+# Initialize BigQuery client with credentials
+credentials = get_credentials()
 
 # Initialize BigQuery client
 project = 'peachy-268419'
 client = bigquery.Client(project=project, credentials=credentials)
+
+import nps
+import referrals
 
 # Streamlit interface
 start_date = st.sidebar.date_input("Start Date", value=pd.to_datetime("2023-01-01"))
